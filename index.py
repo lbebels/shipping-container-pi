@@ -116,8 +116,8 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             self.file_read = io.open("/dev/i2c-"+str(bus), "rb", buffering=0)
             self.file_write = io.open("/dev/i2c-"+str(bus), "wb", buffering=0)
 
-            e = ECSettings()
-            b = tk.Button(root, text="EC settings and calibration", command=e.calib_sett)
+            self.ecSettings = ECSettings()
+            b = tk.Button(root, text="EC settings and calibration", command=self.ecSettings.calib_sett)
             b.grid(row=5,sticky=W)
 
             # initializes I2C to either a user specified or default address
@@ -192,7 +192,32 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             global EC_value
             device.set_i2c_address(EC_addr)
             device.read(num_of_bytes=31)
-            EC_value.set(value_list)
+            split = value_list.split(",")
+            if(self.ecSettings.conductivity.get() == 1):
+                EC_value.set(split[0])
+            else:
+                EC_value.set("not read")
+
+
+        def TDS_reading(self):
+            global TDS_value
+            device.set_i2c_address(EC_addr)
+            device.read(num_of_bytes=31)
+            split = value_list.split(",")
+            if(self.ecSettings.TDS.get() == 1):
+                TDS_value.set(split[1])
+            else:
+                TDS_value.set("not read")
+
+        def Sal_reading(self):
+            global Sal_value
+            device.set_i2c_address(EC_addr)
+            device.read(num_of_bytes=31)
+            split = value_list.split(",")
+            try:
+                Sal_value.set(split[2])
+            except:
+                Sal_value.set("not read")
 
         #change water line labels to blue if above that point
         #or red if below
@@ -213,15 +238,21 @@ def main():
 
         t4 = threading.Thread(target=device.pH_reading())
         t5 = threading.Thread(target=device.EC_reading())
-        t6 = threading.Thread(target=device.status_IO())
+        t6 = threading.Thread(target=device.TDS_reading())
+        t7 = threading.Thread(target=device.Sal_reading())
+        t8 = threading.Thread(target=device.status_IO())
 
         t4.start()
         t5.start()
         t6.start()
+        t7.start()
+        t8.start()
 
         t4.join()
         t5.join()
         t6.join()
+        t7.join()
+        t8.join()
 ##        device.pH_reading()
 ##        device.EC_reading()
 ##        device.status_IO()
@@ -248,8 +279,14 @@ pH_frame.grid(row=0,column=0,stick="w")
 EC_frame=Frame(root,bg=red_bg)
 EC_frame.grid(row=1,column=0,sticky="w")
 
+TDS_frame=Frame(root, bg=red_bg)
+TDS_frame.grid(row=2,column=0,sticky="w")
+
+Sal_frame=Frame(root, bg=red_bg)
+Sal_frame.grid(row=3,column=0,sticky="w")
+
 IO_frame=Frame(root,bg=red_bg)
-IO_frame.grid(row=2,column=0,sticky="w")
+IO_frame.grid(row=4,column=0,sticky="w")
 
 
 #---Tkinter init/layout---#
@@ -257,6 +294,10 @@ pH_value = StringVar()
 pH_value.set(0.00)
 EC_value = StringVar()
 EC_value.set(0.00)
+TDS_value = StringVar()
+TDS_value.set(0.00)
+Sal_value = StringVar()
+Sal_value.set(0.00)
 IO_state = StringVar()
 IO_state.set("")
 
@@ -267,6 +308,12 @@ Label(pH_frame,textvariable=pH_value, bg="blue", fg="White",font=h1).grid(row=0,
 Label(EC_frame,text="EC Value: ",bg="purple",fg="White",font=h1).grid(row=0,column=0)
 Label(EC_frame,textvariable=EC_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
 
+Label(TDS_frame,text="TDS Value: ",bg="purple",fg="white",font=h1).grid(row=0,column=0)
+Label(TDS_frame,textvariable=TDS_value,bg="blue",fg="white",font=h1).grid(row=0,column=1)
+
+Label(Sal_frame,text="Salinity Value: ",bg="purple",fg="white",font=h1).grid(row=0,column=0)
+Label(Sal_frame,textvariable=Sal_value,bg="blue",fg="white",font=h1).grid(row=0,column=1)
+
 Label(IO_frame,text="State: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
 Label(IO_frame,textvariable=IO_state, bg="blue", fg="White",font=h1).grid(row=0,column=1)
 
@@ -274,13 +321,13 @@ Label(IO_frame,textvariable=IO_state, bg="blue", fg="White",font=h1).grid(row=0,
 w = Canvas(root, 
            width=10, 
            height=400,
-           bg="grey")
+           bg="light grey")
 w.grid(row=0, column=6)
 
 w.create_line(5,400,5,0,fill="grey",width=4)
-topLine = w.create_line(1,100,10,100,fill="blue",width=5)
-middleLine = w.create_line(1,200,10,200,fill="blue", width=5)
-bottomLine = w.create_line(1,300,10,300,fill="blue",width=5)
+topLine = w.create_line(1,100,10,100,fill="blue",width=6)
+middleLine = w.create_line(1,200,10,200,fill="blue", width=6)
+bottomLine = w.create_line(1,300,10,300,fill="blue",width=6)
 
 
 device = AtlasI2C()
