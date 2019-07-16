@@ -49,8 +49,9 @@ class ECSettings(ttk.Frame):
             
         except IOError:
             print("Conductivity query failed \n - Address may be invalid, use List_addr command to see available addresses")
+
  
-        
+    #same format as setConductivity() for Total Dissolved Solids    
     def setTDS(self):
         try:
             device.set_i2c_address(100)
@@ -61,6 +62,7 @@ class ECSettings(ttk.Frame):
             print("TDS query failed \n - Address may be invalid, use List_addr command to see available addresses")
         
 
+    #same format as setConductivity() for Salinity
     def setSalinity(self):
         try:
             device.set_i2c_address(100)
@@ -71,6 +73,7 @@ class ECSettings(ttk.Frame):
             print("Salinity query failed \n - Address may be invalid, use List_addr command to see available addresses")
 
 
+    #same format as setConductivity() for Specific Gravity
     def setSG(self):
         try:
             device.set_i2c_address(100)
@@ -115,7 +118,7 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
 
             e = ECSettings()
             b = tk.Button(root, text="EC settings and calibration", command=e.calib_sett)
-            b.grid()
+            b.grid(row=5,sticky=W)
 
             # initializes I2C to either a user specified or default address
             #self.set_i2c_address(adress)
@@ -173,52 +176,55 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             elif string.upper().startswith("SLEEP"):
                 return "sleep mode"
             else:
-                time.sleep(.5)
+                time.sleep(0.5)
 
             return self.read()
 
+        #display pH values read from i2c device
         def pH_reading(self):
             global pH_value
             device.set_i2c_address(pH_addr)
             device.read(num_of_bytes=31)
-            #pH_value = value_list
             pH_value.set(value_list)
 
+        #display EC values read from i2c device
         def EC_reading(self):
             global EC_value
             device.set_i2c_address(EC_addr)
             device.read(num_of_bytes=31)
-            #EC_value = value_list
             EC_value.set(value_list)
 
+        #change water line labels to blue if above that point
+        #or red if below
         def status_IO(self):
             global IO_state
             state = GPIO.input(6)
-            #print state
             if state:
                 IO_state.set("On")
+                w.itemconfig(topLine, fill="blue")
             else:
                 IO_state.set("Off")
+                w.itemconfig(topLine, fill="red")
     
 
 
 def main():
     #while True:
 
-##        t4 = threading.Thread(target=device.pH_reading())
-##        t5 = threading.Thread(target=device.EC_reading())
-##        t6 = threading.Thread(target=device.status_IO())
-##
-##        t4.start()
-##        t5.start()
-##        t6.start()
-##
-##        t4.join()
-##        t5.join()
-##        t6.join()
-        device.pH_reading()
-        device.EC_reading()
-        device.status_IO()
+        t4 = threading.Thread(target=device.pH_reading())
+        t5 = threading.Thread(target=device.EC_reading())
+        t6 = threading.Thread(target=device.status_IO())
+
+        t4.start()
+        t5.start()
+        t6.start()
+
+        t4.join()
+        t5.join()
+        t6.join()
+##        device.pH_reading()
+##        device.EC_reading()
+##        device.status_IO()
         #print type(pH_value)
 		
         root.after(1000,main)
@@ -263,6 +269,18 @@ Label(EC_frame,textvariable=EC_value, bg="blue", fg="White",font=h1).grid(row=0,
 
 Label(IO_frame,text="State: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
 Label(IO_frame,textvariable=IO_state, bg="blue", fg="White",font=h1).grid(row=0,column=1)
+
+#----Water level graphic----#
+w = Canvas(root, 
+           width=10, 
+           height=400,
+           bg="grey")
+w.grid(row=0, column=6)
+
+w.create_line(5,400,5,0,fill="grey",width=4)
+topLine = w.create_line(1,100,10,100,fill="blue",width=5)
+middleLine = w.create_line(1,200,10,200,fill="blue", width=5)
+bottomLine = w.create_line(1,300,10,300,fill="blue",width=5)
 
 
 device = AtlasI2C()
