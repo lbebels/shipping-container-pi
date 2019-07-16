@@ -12,6 +12,7 @@ import RPi.GPIO as GPIO
 import Tkinter as tk
 from Tkinter import *
 import ttk
+import threading
 
 #from toggle import Toggle
 
@@ -19,33 +20,80 @@ import ttk
 #---Initialization---#
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
-GPIO.setup(6,GPIO.IN,pull_up_down = GPIO.PUD_DOWN)
+GPIO.setup(6,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
 i2c_list = [99,100]
 pH_addr, EC_addr = i2c_list
 
 
 class ECSettings(ttk.Frame):
-    def __init__(self):
-        self.CondCheck = IntVar(value=1)
-        self.TDSCheck = IntVar(value=0)
-        self.SalCheck = IntVar(value=0)
-        self.SGCheck = IntVar(value=0)
+    #TODO:
+    #booleans or 1/0 for conductivity (default true), TDS, salinity, and specific gravity.
+    #getters and setters for those
+    #dry cal? default 0?
+    #high cal
+    #low cal
+    def __init__(self, *args, **kwargs):
+        self.conductivity = IntVar()
+        self.TDS = IntVar()
+        self.salinity = IntVar()
+        self.SG = IntVar()
+
     
+    #setConductivity() toggles whether EC meter is reading Electrical Conductivity
+    #sends query "O, EC, x" where x=1 if Conductivity box is checked and x=0 if not
+    def setConductivity(self):
+        try:
+            device.set_i2c_address(100) #check that we are communicating with EC (100) and not pH (99)
+            toggle = "O,EC," + str(self.conductivity.get()) #create query string
+            device.query(toggle) #send query
+            
+        except IOError:
+            print("Conductivity query failed \n - Address may be invalid, use List_addr command to see available addresses")
+ 
+        
+    def setTDS(self):
+        try:
+            device.set_i2c_address(100)
+            toggle = "O,TDS," + str(self.TDS.get())
+            device.query(toggle)
+
+        except IOError:
+            print("TDS query failed \n - Address may be invalid, use List_addr command to see available addresses")
+        
+
+    def setSalinity(self):
+        try:
+            device.set_i2c_address(100)
+            toggle="O,S," + str(self.salinity.get())
+            device.query(toggle)
+
+        except IOError:
+            print("Salinity query failed \n - Address may be invalid, use List_addr command to see available addresses")
+
+
+    def setSG(self):
+        try:
+            device.set_i2c_address(100)
+            toggle="O,SG," + str(self.SG.get())
+            device.query(toggle)
+
+        except IOError:
+            print("Specific gravity query failed \n - Address may be invalid, use List_addr command to see available addresses")
+
+
+
     def calib_sett(self, **kwargs):
         win = tk.Toplevel()
         win.wm_title("EC settings")
-        #master = Tk()
-        var1 = IntVar(value=1)
-        Checkbutton(win, text="Conductivity", variable=self.CondCheck).grid(row=0, sticky=W)
-        var2 = IntVar()
-        Checkbutton(win, text="Total Dissolved Solids", variable=var2).grid(row=1, sticky=W)
-        var3 = IntVar()
-        Checkbutton(win, text="Salinity", variable=var2).grid(row=2,sticky=W)
-##
-##        try:
-##            print(device.query("O,EC,1"))
-##        except IOError:
-##            print("Query failed \n - Address may be invalid, use List_addr command to see available addresses")
+        #----for some reason, lambda is needed in the checkbutton commands to prevent them from executing at runtime----#
+        Checkbutton(win, text="Conductivity", variable=self.conductivity, command=lambda: self.setConductivity())\
+                         .grid(row=0, sticky=W)
+        Checkbutton(win, text="Total Dissolved Solids", variable=self.TDS, command=lambda: self.setTDS())\
+                         .grid(row=1, sticky=W)
+        Checkbutton(win, text="Salinity", variable=self.salinity, command=lambda: self.setSalinity())\
+                         .grid(row=2,sticky=W)
+        Checkbutton(win, text="Specific Gravity", variable=self.SG, command=lambda: self.setSG())\
+                         .grid(row=3,sticky=W)
 
 
 
@@ -81,21 +129,6 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             fcntl.ioctl(self.file_read, I2C_SLAVE, addr)
             fcntl.ioctl(self.file_write, I2C_SLAVE, addr)
             self.current_addr = addr
-        
-        def query(self, string):
-            # write a command to the board, wait the correct timeout, and read the response
-            self.write(string)
-
-            # the read and calibration commands require a longer timeout
-            if((string.upper().startswith("R")) or
-               (string.upper().startswith("CAL"))):
-                time.sleep(self.long_timeout)
-            elif string.upper().startswith("SLEEP"):
-                return "sleep mode"
-            else:
-                time.sleep(self.short_timeout)
-
-            return self.read()
             
 
         def write(self, cmd):
@@ -129,6 +162,20 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
                     else:
                         return "Error " + str(res[0])
 
+        def query(self, string):
+            # write a command to the board, wait the correct timeout, and read the response
+            self.write(string)
+
+            # the read and calibration commands require a longer timeout
+            if((string.upper().startswith("R")) or
+               (string.upper().startswith("CAL"))):
+                time.sleep(1.5)
+            elif string.upper().startswith("SLEEP"):
+                return "sleep mode"
+            else:
+                time.sleep(.5)
+
+            return self.read()
 
         def pH_reading(self):
             global pH_value
@@ -147,25 +194,28 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
         def status_IO(self):
             global IO_state
             state = GPIO.input(6)
+            #print state
             if state:
                 IO_state.set("On")
             else:
                 IO_state.set("Off")
-	    
-
-#class EC(AtlasI2C):
-    #TODO:
-    #booleans or 1/0 for conductivity (default true), TDS, salinity, and specific gravity.
-    #getters and setters for those
-    #dry cal? default 0?
-    #high cal
-    #low cal
     
 
 
 def main():
     #while True:
-        
+
+##        t4 = threading.Thread(target=device.pH_reading())
+##        t5 = threading.Thread(target=device.EC_reading())
+##        t6 = threading.Thread(target=device.status_IO())
+##
+##        t4.start()
+##        t5.start()
+##        t6.start()
+##
+##        t4.join()
+##        t5.join()
+##        t6.join()
         device.pH_reading()
         device.EC_reading()
         device.status_IO()
