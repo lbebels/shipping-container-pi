@@ -13,6 +13,7 @@ import Tkinter as tk
 from Tkinter import *
 import ttk
 import threading
+import tkMessageBox
 
 #from toggle import Toggle
 
@@ -21,8 +22,83 @@ import threading
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(6,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(11,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(9,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(10,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
 i2c_list = [99,100]
 pH_addr, EC_addr = i2c_list
+
+
+class PHSettings(ttk.Frame):
+    
+    #TODO:
+    #Account for temperature in calibration
+    def __init__(self, *args, **kwargs):
+        self.low = IntVar()
+        self.mid = IntVar()
+        self.high = IntVar()
+        self.low.set(0)
+        self.mid.set(0)
+        
+        self.levels = [("Mid",self.mid), ("Low",self.low)] #, ("High",self.high)]
+        #commented out high for 2 point calibration
+        #mid should be calibrated first, then low, then high
+        global e1
+        global e2
+        global e3
+
+    def run_cal(self, win, entries):
+        #need to do mid, then low, then high
+        device.set_i2c_address(99) #check that we are communicating with pH (99) and not EC (100)
+        for level in self.levels:
+            cal = "Cal, " + str(level[0]) + ", " + str(level[1].get())
+            tkMessageBox.showinfo("{} Calibration".format(str(level[0])),"Place probe in pH {} solution".format(str(level[1].get())))
+            root.update()
+            time.sleep(10)
+            device.query(cal)
+
+        #countdown clock to wait a minute for stabilization after placing in solution?
+
+        
+    def calib_sett(self):
+        win = tk.Toplevel()
+        win.wm_title("PH Calibration")
+        entries = []
+##        fields = "Enter Low pH Value: ", "Enter Mid pH Value: ", "Enter High pH Value: "
+##        x=0
+##        for field in fields:
+##            lab = tk.Label(win, width=15, text=field, anchor='w')
+##            #print(self.levels)
+##            ent = tk.Entry(win, textvariable=x)
+##            x+=x
+##            lab.grid(sticky=W)
+##            ent.grid(sticky=E)
+##            entries.append(ent)
+
+        #----This is bad/slow code, should use above commented loop format but it isn't working----#       
+        lowl = tk.Label(win, width=20, text="Enter Low pH Value: ", anchor='w')
+        lowl.grid(row=0,column=0)
+
+        entl = tk.Entry(win, textvariable=self.low)
+        entl.grid(row=0,column=2)
+        entries.append(entl)
+
+        lowm = tk.Label(win, width=20, text="Enter Mid pH Value: ", anchor='w')
+        lowm.grid(row=1,column=0)
+
+        entm = tk.Entry(win, textvariable=self.mid)
+        entm.grid(row=1,column=2)
+        entries.append(entm)
+
+##        lowh = tk.Label(win, width=20, text="Enter High pH Value: ", anchor='w')
+##        lowh.grid(row=2,column=0)
+##
+##        enth = tk.Entry(win, textvariable=self.high)
+##        enth.grid(row=2,column=2)
+##        entries.append(enth)
+
+        b = tk.Button(win, text="Run Calibration", command=lambda: self.run_cal(win, entries))
+        b.grid(row=8, column = 1)
 
 
 class ECSettings(ttk.Frame):
@@ -46,7 +122,7 @@ class ECSettings(ttk.Frame):
             device.set_i2c_address(100) #check that we are communicating with EC (100) and not pH (99)
             toggle = "O,EC," + str(self.conductivity.get()) #create query string
             device.query(toggle) #send query
-            
+                        
         except IOError:
             print("Conductivity query failed \n - Address may be invalid, use List_addr command to see available addresses")
 
@@ -119,6 +195,10 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             self.ecSettings = ECSettings()
             b = tk.Button(root, text="EC settings and calibration", command=self.ecSettings.calib_sett)
             b.grid(row=5,sticky=W)
+
+            self.phSettings = PHSettings()
+            c = tk.Button(root, text="PH calibration", command=self.phSettings.calib_sett)
+            c.grid(row=6, sticky=W)
 
             # initializes I2C to either a user specified or default address
             #self.set_i2c_address(adress)
@@ -214,23 +294,30 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             device.set_i2c_address(EC_addr)
             device.read(num_of_bytes=31)
             split = value_list.split(",")
-            try:
+            if(self.ecSettings.salinity.get() == 1):
                 Sal_value.set(split[2])
-            except:
+            else:
                 Sal_value.set("not read")
 
         #change water line labels to blue if above that point
         #or red if below
         def status_IO(self):
             global IO_state
-            state = GPIO.input(6)
-            if state:
-                IO_state.set("On")
-                w.itemconfig(topLine, fill="blue")
-            else:
-                IO_state.set("Off")
-                w.itemconfig(topLine, fill="red")
-    
+            states = []
+            states.append(GPIO.input(10)) #full
+            states.append(GPIO.input(9))    #3/4 tank
+            states.append(GPIO.input(11))   #1/2 tank
+            states.append(GPIO.input(6))    #1/4 tank
+            count = 0 #TODO: use this to keep track of which line should be changed.
+            for state in states:
+                if state:
+                    #IO_state.set("On")
+                    w.itemconfig(lines[count], fill="blue")
+                    count+=1
+                else:
+                    #IO_state.set("Off")
+                    w.itemconfig(lines[count], fill="red")
+                    count+=1
 
 
 def main():
@@ -325,9 +412,17 @@ w = Canvas(root,
 w.grid(row=0, column=6)
 
 w.create_line(5,400,5,0,fill="grey",width=4)
-topLine = w.create_line(1,100,10,100,fill="blue",width=6)
-middleLine = w.create_line(1,200,10,200,fill="blue", width=6)
-bottomLine = w.create_line(1,300,10,300,fill="blue",width=6)
+
+#----Water Lines----#
+lines = []
+fullLine = w.create_line(1,5,10,5, fill="blue", width=6)
+topLine = w.create_line(1,105,10,105,fill="blue",width=6)
+middleLine = w.create_line(1,205,10,205,fill="blue", width=6)
+bottomLine = w.create_line(1,305,10,305,fill="blue",width=6)
+lines.append(fullLine)
+lines.append(topLine)
+lines.append(middleLine)
+lines.append(bottomLine)
 
 
 device = AtlasI2C()
