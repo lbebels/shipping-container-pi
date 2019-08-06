@@ -5,6 +5,7 @@ import io         # used to create file streams
 from io import open
 import fcntl      # used to access I2C parameters like addresses
 import serial     # for CO2 serial connection
+from sht_sensor import Sht
 
 import time       # used for sleep delay and timestamps
 import string     # helps parse strings
@@ -17,10 +18,24 @@ import ttk
 import threading
 import tkMessageBox
 
+import matplotlib
+matplotlib.use('TkAgg')
+
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2TkAgg
+from matplotlib.backend_bases import key_press_handler
+from matplotlib.figure import Figure
+
+import numpy as np
+
 #from toggle import Toggle
 
 
 #----Initialization----#
+sht75_datagpio=27
+sht75_clkgpio=17
+
+GPIO.setup(sht75_datagpio,GPIO.OUT, initial=GPIO.LOW)
+GPIO.setup(sht75_clkgpio,GPIO.OUT, initial=GPIO.LOW)
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(6,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
@@ -363,6 +378,7 @@ class AtlasI2C(ttk.Frame):          #ttk.Frame is a container used to group othe
             Temp_value.set(value_list)
 
 
+    
 def main():
     #while True:
 
@@ -394,6 +410,12 @@ def main():
         #t6.join()
         t7.join()
         t8.join()
+
+        global current, date
+        current=time.strftime("%H:%M")
+        date=time.strftime("%A, %b %d, %Y")
+        ClockText.configure(text=current)
+        DateText.configure(text=date)
 		
         root.after(1000,main)
 
@@ -403,15 +425,18 @@ def main():
 root = Tk()
 root.config(bg="black")
 root.wm_title("Dashboard")
-root.geometry("800x800") #dimensions of whole panel
+root.geometry("1000x800") #dimensions of whole panel
 
 #---Styles---#
 red_bg = "#CC0000"
 h1 = ("Calibri",14)
 
 #---Frame Layout---#
+Clock_frame=Frame(root,bg="black")
+Clock_frame.grid(row=0,column=6,sticky="e")
+
 pH_frame=Frame(root,bg="black")
-pH_frame.grid(row=0,column=0,stick="w")
+pH_frame.grid(row=0,column=0,sticky="w")
 
 EC_frame=Frame(root,bg=red_bg)
 EC_frame.grid(row=1,column=0,sticky="w")
@@ -449,6 +474,11 @@ Temp_value = StringVar()
 Temp_value.set(0.00)
 
 
+DateText=Label(Clock_frame,text="",bg="black",fg="red", font=h1)
+DateText.grid(row=0,column=0,sticky=W+E)
+ClockText=Label(Clock_frame,text="",bg="black",fg="white", font=h1)
+ClockText.grid(row=1,column=0,sticky=E+W)
+
 Label(pH_frame,text="pH Value: ",bg="gray",fg="White",font=h1).grid(row=0,column=0)
 Label(pH_frame,textvariable=pH_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
 
@@ -467,8 +497,22 @@ Label(SG_frame,textvariable=SG_value,bg="blue",fg="white",font=h1).grid(row=0,co
 Label(CO2_frame,text="CO2: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
 Label(CO2_frame,textvariable=CO2_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
 
-Label(Temp_frame,text="Temperature: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
+Label(Temp_frame,text="Solution Temperature: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
 Label(Temp_frame,textvariable=Temp_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
+
+
+
+
+Frame3 = Frame(root, bg="purple",width=400,height=200).grid(row=6,rowspan=2,column=17,columnspan=3,sticky=N+S+E+W)
+
+fig = Figure(figsize=(5, 4), dpi=100)
+t = np.arange(0, 3, .01)
+fig.add_subplot(111).plot(t, 2 * np.sin(2 * np.pi * t))
+
+canvas1 = FigureCanvasTkAgg(fig, master=Frame3)  # A tk.DrawingArea.
+#canvas1.show()
+#fig.canvas.draw()
+canvas1.get_tk_widget().grid(row=6,column=17)
 
 ###----Water level graphic----#
 ##w = Canvas(root, 
