@@ -1,8 +1,10 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 import io         # used to create file streams
 from io import open
 import fcntl      # used to access I2C parameters like addresses
+import serial     # for CO2 serial connection
 
 import time       # used for sleep delay and timestamps
 import string     # helps parse strings
@@ -18,17 +20,20 @@ import tkMessageBox
 #from toggle import Toggle
 
 
-#---Initialization---#
+#----Initialization----#
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(6,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(11,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(9,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(10,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
-i2c_list = [99,100]
-pH_addr, EC_addr = i2c_list
+i2c_list = [99,100,102] #99 is pH, 100 is EC, 102 is Temp
+ser = serial.Serial("/dev/serial0",bytesize=8,baudrate =9600,timeout = .5) #serial connection for CO2
+
+pH_addr, EC_addr, temp_addr = i2c_list
 
 
+#----PhSettings defines an interface for calibrating the pH probe----#
 class PHSettings(ttk.Frame):
     
     #TODO:
@@ -36,71 +41,54 @@ class PHSettings(ttk.Frame):
     def __init__(self, *args, **kwargs):
         self.low = IntVar()
         self.mid = IntVar()
-        self.high = IntVar()
+        #self.high = IntVar()
         self.low.set(0)
         self.mid.set(0)
         
         self.levels = [("Mid",self.mid), ("Low",self.low)] #, ("High",self.high)]
         #commented out high for 2 point calibration
         #mid should be calibrated first, then low, then high
-        global e1
-        global e2
-        global e3
 
-    def run_cal(self, win, entries):
+    #----run_cal is called from calib_sett to query the pH probe based on user entered pH values----#
+    def run_cal(self, win):
         #need to do mid, then low, then high
-        device.set_i2c_address(99) #check that we are communicating with pH (99) and not EC (100)
+        device.set_i2c_address(pH_addr) #check that we are communicating with pH (99) and not EC (100)
+        device.query("Cal, clear") #clear previous calibration settings
+        global Temp_value
+        if(Temp_value > 27 or Temp_value < 23): #if solution temp is more than 2 degrees from 25C
+            cal = "T,{}".format(Temp_value.get()) #send query to adjust calibration
+            device.query(cal)
         for level in self.levels:
-            cal = "Cal, " + str(level[0]) + ", " + str(level[1].get())
-            tkMessageBox.showinfo("{} Calibration".format(str(level[0])),"Place probe in pH {} solution".format(str(level[1].get())))
+            cal = "Cal, " + str(level[0]) + ", " + str(level[1].get()) #e.g. "Cal, low, 3"
+            tkMessageBox.showinfo("{} Calibration".format(str(level[0])),"Place probe in pH {} solution".format(str(level[1].get()))) #popup box for each calibration level
             root.update()
             time.sleep(10)
             device.query(cal)
 
-        #countdown clock to wait a minute for stabilization after placing in solution?
+        #TODO:countdown clock to wait a minute for stabilization after placing in solution?
+        #OR display readings and tell user to wait until they are stable to press "ok"
 
-        
+    #----calib_sett is called from __init__ in the AtlasI2C class----#
+    #----Creates interface requesting calibration values from the user----#
     def calib_sett(self):
         win = tk.Toplevel()
         win.wm_title("PH Calibration")
-        entries = []
-##        fields = "Enter Low pH Value: ", "Enter Mid pH Value: ", "Enter High pH Value: "
-##        x=0
-##        for field in fields:
-##            lab = tk.Label(win, width=15, text=field, anchor='w')
-##            #print(self.levels)
-##            ent = tk.Entry(win, textvariable=x)
-##            x+=x
-##            lab.grid(sticky=W)
-##            ent.grid(sticky=E)
-##            entries.append(ent)
+        entries = [self.low, self.mid]
+        fields = "Enter Low pH Value: ", "Enter Mid pH Value: "#, "Enter High pH Value: "
+        x=0
+        for field in fields: #create entry form
+            lab = tk.Label(win, width=20, text=field, anchor='w')
+            ent = tk.Entry(win, textvariable=entries[x])
+            x+=1
+            lab.grid(sticky=W)
+            ent.grid(sticky=E)
 
-        #----This is bad/slow code, should use above commented loop format but it isn't working----#       
-        lowl = tk.Label(win, width=20, text="Enter Low pH Value: ", anchor='w')
-        lowl.grid(row=0,column=0)
-
-        entl = tk.Entry(win, textvariable=self.low)
-        entl.grid(row=0,column=2)
-        entries.append(entl)
-
-        lowm = tk.Label(win, width=20, text="Enter Mid pH Value: ", anchor='w')
-        lowm.grid(row=1,column=0)
-
-        entm = tk.Entry(win, textvariable=self.mid)
-        entm.grid(row=1,column=2)
-        entries.append(entm)
-
-##        lowh = tk.Label(win, width=20, text="Enter High pH Value: ", anchor='w')
-##        lowh.grid(row=2,column=0)
-##
-##        enth = tk.Entry(win, textvariable=self.high)
-##        enth.grid(row=2,column=2)
-##        entries.append(enth)
-
-        b = tk.Button(win, text="Run Calibration", command=lambda: self.run_cal(win, entries))
-        b.grid(row=8, column = 1)
+        b = tk.Button(win, text="Run Calibration", command=lambda: self.run_cal(win)) #send values to run_cal
+        b.grid(row=9, column = 0)
 
 
+#----ECSettings defines an interface for calibrating the EC probe----#
+#----Also allows users to specify which parameters (EC, TDS, Salinity, Specific Gravity) they want to see----#
 class ECSettings(ttk.Frame):
     #TODO:
     #booleans or 1/0 for conductivity (default true), TDS, salinity, and specific gravity.
@@ -113,74 +101,97 @@ class ECSettings(ttk.Frame):
         self.TDS = IntVar()
         self.salinity = IntVar()
         self.SG = IntVar()
-
+        self.Dry = StringVar()
+        self.Dry.set("dry")
+        self.Low = IntVar()
+        self.High = IntVar()
+        self.Levels = [("Dry",self.Dry), ("Low",self.Low), ("High",self.High)]
     
-    #setConductivity() toggles whether EC meter is reading Electrical Conductivity
-    #sends query "O, EC, x" where x=1 if Conductivity box is checked and x=0 if not
-    def setConductivity(self):
+    #---setConductivity() toggles whether EC meter is reading Electrical Conductivity----#
+    #----Sends query "O, EC, x" where x=1 if Conductivity box is checked and x=0 if not----#
+    def setECVals(self, vals):
         try:
-            device.set_i2c_address(100) #check that we are communicating with EC (100) and not pH (99)
-            toggle = "O,EC," + str(self.conductivity.get()) #create query string
-            device.query(toggle) #send query
-                        
-        except IOError:
-            print("Conductivity query failed \n - Address may be invalid, use List_addr command to see available addresses")
-
- 
-    #same format as setConductivity() for Total Dissolved Solids    
-    def setTDS(self):
-        try:
-            device.set_i2c_address(100)
-            toggle = "O,TDS," + str(self.TDS.get())
+            device.set_i2c_address(EC_addr)
+            toggle="O,{},".format(vals[0]) + str(vals[1].get())
             device.query(toggle)
 
         except IOError:
-            print("TDS query failed \n - Address may be invalid, use List_addr command to see available addresses")
+            print("{} query failed in setECVals()\n - Address may be invalid, use List_addr command to see available addresses".format(vals[0]))
+
+    def close_window(self):
+        win.destroy()
+
+    #----Called from __init__ in AtlasI2C class, creates thread for calib_sett but might not make a difference----#
+    def start(self):
+        self._thread = threading.Thread(target=self.calib_sett)
+        self._thread.start()
+
+    #----Called from calib_sett
+    def run_cal(self, root):
+        #need to do dry, then low, then high
+        device.set_i2c_address(EC_addr) #check that we are communicating with EC (100)
+        device.query("Cal, clear") #clear previous calibration settings
+        global Temp_value
+        if(Temp_value > 30 or Temp_value < 20):
+            #TODO: need to use calibration levels on the bottle label if Temp is more than 5C away from 25C
+            pass
         
+        for level in self.Levels:
+            cal = "Cal, " + str(level[0]) + ", " + str(level[1].get()) #e.g. cal, low, 12880
+            tkMessageBox.showinfo("{} Calibration".format(str(level[0])),"Place probe in EC {} solution".format(str(level[1].get()))) #popup box for each calibration level
+            root.update()
+            time.sleep(10)
+            try:
+                device.query(cal)
 
-    #same format as setConductivity() for Salinity
-    def setSalinity(self):
-        try:
-            device.set_i2c_address(100)
-            toggle="O,S," + str(self.salinity.get())
-            device.query(toggle)
+            except IOError:
+                print("{} query faied in ECSettings.run_cal()".format(cal))
 
-        except IOError:
-            print("Salinity query failed \n - Address may be invalid, use List_addr command to see available addresses")
+        #countdown clock to wait a minute for stabilization after placing in solution?
+        #OR display readings and ask user to wait until they are stable to click "ok"
 
-
-    #same format as setConductivity() for Specific Gravity
-    def setSG(self):
-        try:
-            device.set_i2c_address(100)
-            toggle="O,SG," + str(self.SG.get())
-            device.query(toggle)
-
-        except IOError:
-            print("Specific gravity query failed \n - Address may be invalid, use List_addr command to see available addresses")
-
-
-
+    #----Called from start() (maybe change to be called from __init__ in AtlasI2C class----#
+    #----Interface to let user select values to be displayed and/or enter calibration values----#
     def calib_sett(self, **kwargs):
+        global win
         win = tk.Toplevel()
         win.wm_title("EC settings")
         #----for some reason, lambda is needed in the checkbutton commands to prevent them from executing at runtime----#
-        Checkbutton(win, text="Conductivity", variable=self.conductivity, command=lambda: self.setConductivity())\
+        Checkbutton(win, text="Conductivity", variable=self.conductivity, command=lambda: self.setECVals(["EC", self.conductivity]))\
                          .grid(row=0, sticky=W)
-        Checkbutton(win, text="Total Dissolved Solids", variable=self.TDS, command=lambda: self.setTDS())\
+        Checkbutton(win, text="Total Dissolved Solids", variable=self.TDS, command=lambda: self.setECVals(["TDS", self.TDS]))\
                          .grid(row=1, sticky=W)
-        Checkbutton(win, text="Salinity", variable=self.salinity, command=lambda: self.setSalinity())\
+        Checkbutton(win, text="Salinity", variable=self.salinity, command=lambda: self.setECVals(["S", self.salinity]))\
                          .grid(row=2,sticky=W)
-        Checkbutton(win, text="Specific Gravity", variable=self.SG, command=lambda: self.setSG())\
+        Checkbutton(win, text="Specific Gravity", variable=self.SG, command=lambda: self.setECVals(["SG", self.SG]))\
                          .grid(row=3,sticky=W)
 
+        variables = [self.Low, self.High]
+        # -*- coding: utf-8 -*-
+        fields = "Enter Low EC Value (µS): ", "Enter High EC Value (µS): "
+        x=0
+        for field in fields: #create calibration entry form
+            lab = tk.Label(win, width=20, text=field, anchor='w')
+            #print(self.levels)
+            ent = tk.Entry(win, textvariable=variables[x])
+            x+=1
+            lab.grid(sticky=W)
+            ent.grid(sticky=E)
 
 
-class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group other widgets together
+        b = tk.Button(win, text="Run Calibration", command=lambda: self.run_cal(win)) #call run_cal
+        b.grid(row=9, column = 0)
+        c = tk.Button(win, text="Exit", command=self.close_window)
+        c.grid(row=9, column=2)
+
+
+#----Sample code taken from Atlas Scientific----#
+#----Allows communication with I2C devices----#
+class AtlasI2C(ttk.Frame):          #ttk.Frame is a container used to group other widgets together
         long_timeout = 1.5          # the timeout needed to query readings and calibrations
         short_timeout = .5          # timeout for regular commands
         default_bus = 1             # the default bus for I2C on the newer Raspberry Pis, certain older boards use bus 0
-        default_address = 99        # the default address for the sensor
+        default_address = 99        # the default address for the sensor, also the pH probe address
         current_addr = default_address
     
 
@@ -192,18 +203,19 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             self.file_read = io.open("/dev/i2c-"+str(bus), "rb", buffering=0)
             self.file_write = io.open("/dev/i2c-"+str(bus), "wb", buffering=0)
 
+            #button for EC settings and calibration
             self.ecSettings = ECSettings()
-            b = tk.Button(root, text="EC settings and calibration", command=self.ecSettings.calib_sett)
-            b.grid(row=5,sticky=W)
+            b = tk.Button(root, text="EC settings and calibration", command=self.ecSettings.start)#self.ecSettings.calib_sett)
+            b.grid(row=8,sticky=W)
 
+            #button for pH calibration
             self.phSettings = PHSettings()
             c = tk.Button(root, text="PH calibration", command=self.phSettings.calib_sett)
-            c.grid(row=6, sticky=W)
+            c.grid(row=9, sticky=W)
 
-            # initializes I2C to either a user specified or default address
-            #self.set_i2c_address(adress)
-        
 
+        #----initializes I2C to either a user specified or default address----#
+        #----self.set_i2c_address(address)----#
         def set_i2c_address(self, addr):
             # set the I2C communications to the slave specified by the address
             # The commands for I2C dev using the ioctl functions are specified in
@@ -232,7 +244,7 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
                         # NOTE: having to change the MSB to 0 is a glitch in the raspberry pi, and you shouldn't have to do this!
                         char_list = list(map(lambda x: chr(ord(x) & ~0x80), list(response[1:])))
                         value_list = ''.join(char_list)
-                        #print "Command succeeded " + ''.join(char_list)     # convert the char list to a string and returns it
+                        return ''.join(char_list)     # convert the char list to a string and returns it
                     else:
                         return "Error " + str(ord(response[0]))
                         
@@ -241,7 +253,7 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
                         # change MSB to 0 for all received characters except the first and get a list of characters
                         # NOTE: having to change the MSB to 0 is a glitch in the raspberry pi, and you shouldn't have to do this!
                         char_list = list(map(lambda x: chr(x & ~0x80), list(res[1:])))
-                        return "Command succeeded " + ''.join(char_list)     # convert the char list to a string and returns it
+                        return ''.join(char_list)     # convert the char list to a string and returns it
                     else:
                         return "Error " + str(res[0])
 
@@ -265,7 +277,7 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             global pH_value
             device.set_i2c_address(pH_addr)
             device.read(num_of_bytes=31)
-            pH_value.set(value_list)
+            pH_value.set(value_list) #value_list is initialized in device.read()
 
         #display EC values read from i2c device
         def EC_reading(self):
@@ -278,7 +290,7 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             else:
                 EC_value.set("not read")
 
-
+        #display Total Dissolved Solids values read from i2c device
         def TDS_reading(self):
             global TDS_value
             device.set_i2c_address(EC_addr)
@@ -289,6 +301,7 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
             else:
                 TDS_value.set("not read")
 
+        #display Salinity values read from i2c device
         def Sal_reading(self):
             global Sal_value
             device.set_i2c_address(EC_addr)
@@ -298,6 +311,17 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
                 Sal_value.set(split[2])
             else:
                 Sal_value.set("not read")
+
+        #display Specific Gravity values read from i2c device        
+        def SG_reading(self):
+            global SG_value
+            device.set_i2c_address(EC_addr)
+            device.read(num_of_bytes=31)
+            split = value_list.split(",")
+            if(self.ecSettings.SG.get() == 1):
+                SG_value.set(split[2])
+            else:
+                SG_value.set("not read")
 
         #change water line labels to blue if above that point
         #or red if below
@@ -319,31 +343,57 @@ class AtlasI2C(ttk.Frame):              #ttk.Frame is a container used to group 
                     w.itemconfig(lines[count], fill="red")
                     count+=1
 
+        #display CO2 values read from serial connection            
+        def CO2_reading(self):
+            global CO2_value
+            ser.flushInput()
+            ser.write("\xFE\x44\x00\x08\x02\x9F\x25")
+            time.sleep(.5)
+            resp = ser.read(7)
+            high = ord(resp[3])
+            low = ord(resp[4])
+            CO2_value.set(str((high*256) + low))
+
+        #display Temperature values read from i2c device
+        def Temp_reading(self):
+            global Temp_value
+            device.set_i2c_address(temp_addr)
+            
+            device.read(num_of_bytes=31)
+            Temp_value.set(value_list)
+
 
 def main():
     #while True:
 
-        t4 = threading.Thread(target=device.pH_reading())
-        t5 = threading.Thread(target=device.EC_reading())
-        t6 = threading.Thread(target=device.TDS_reading())
-        t7 = threading.Thread(target=device.Sal_reading())
-        t8 = threading.Thread(target=device.status_IO())
+        #----Thread readings for each component on main interface----#
+        t1 = threading.Thread(target=device.pH_reading())
+        t2 = threading.Thread(target=device.EC_reading())
+        t3 = threading.Thread(target=device.TDS_reading())
+        t4 = threading.Thread(target=device.Sal_reading())
+        t5 = threading.Thread(target=device.SG_reading())
+        #t6 = threading.Thread(target=device.status_IO())
+        t7 = threading.Thread(target=device.CO2_reading())
+        t8 = threading.Thread(target=device.Temp_reading())
 
+
+        t1.start()
+        t2.start()
+        t3.start()
         t4.start()
         t5.start()
-        t6.start()
+        #t6.start()
         t7.start()
         t8.start()
 
+        t1.join()
+        t2.join()
+        t3.join()
         t4.join()
         t5.join()
-        t6.join()
+        #t6.join()
         t7.join()
         t8.join()
-##        device.pH_reading()
-##        device.EC_reading()
-##        device.status_IO()
-        #print type(pH_value)
 		
         root.after(1000,main)
 
@@ -353,7 +403,7 @@ def main():
 root = Tk()
 root.config(bg="black")
 root.wm_title("Dashboard")
-#root.geometry("800x800")
+root.geometry("800x800") #dimensions of whole panel
 
 #---Styles---#
 red_bg = "#CC0000"
@@ -372,8 +422,14 @@ TDS_frame.grid(row=2,column=0,sticky="w")
 Sal_frame=Frame(root, bg=red_bg)
 Sal_frame.grid(row=3,column=0,sticky="w")
 
-IO_frame=Frame(root,bg=red_bg)
-IO_frame.grid(row=4,column=0,sticky="w")
+SG_frame=Frame(root, bg=red_bg)
+SG_frame.grid(row=4, column=0, sticky="w")
+
+CO2_frame=Frame(root,bg=red_bg)
+CO2_frame.grid(row=5,column=0,sticky="w")
+
+Temp_frame=Frame(root,bg=red_bg)
+Temp_frame.grid(row=6,column=0,sticky="w")
 
 
 #---Tkinter init/layout---#
@@ -385,8 +441,12 @@ TDS_value = StringVar()
 TDS_value.set(0.00)
 Sal_value = StringVar()
 Sal_value.set(0.00)
-IO_state = StringVar()
-IO_state.set("")
+SG_value = StringVar()
+SG_value.set(0.00)
+CO2_value = StringVar()
+CO2_value.set(0.00)
+Temp_value = StringVar()
+Temp_value.set(0.00)
 
 
 Label(pH_frame,text="pH Value: ",bg="gray",fg="White",font=h1).grid(row=0,column=0)
@@ -401,28 +461,34 @@ Label(TDS_frame,textvariable=TDS_value,bg="blue",fg="white",font=h1).grid(row=0,
 Label(Sal_frame,text="Salinity Value: ",bg="purple",fg="white",font=h1).grid(row=0,column=0)
 Label(Sal_frame,textvariable=Sal_value,bg="blue",fg="white",font=h1).grid(row=0,column=1)
 
-Label(IO_frame,text="State: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
-Label(IO_frame,textvariable=IO_state, bg="blue", fg="White",font=h1).grid(row=0,column=1)
+Label(SG_frame,text="Specific Gravity Value: ",bg="purple",fg="white",font=h1).grid(row=0,column=0)
+Label(SG_frame,textvariable=SG_value,bg="blue",fg="white",font=h1).grid(row=0,column=1)
 
-#----Water level graphic----#
-w = Canvas(root, 
-           width=10, 
-           height=400,
-           bg="light grey")
-w.grid(row=0, column=6)
+Label(CO2_frame,text="CO2: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
+Label(CO2_frame,textvariable=CO2_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
 
-w.create_line(5,400,5,0,fill="grey",width=4)
+Label(Temp_frame,text="Temperature: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
+Label(Temp_frame,textvariable=Temp_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
 
-#----Water Lines----#
-lines = []
-fullLine = w.create_line(1,5,10,5, fill="blue", width=6)
-topLine = w.create_line(1,105,10,105,fill="blue",width=6)
-middleLine = w.create_line(1,205,10,205,fill="blue", width=6)
-bottomLine = w.create_line(1,305,10,305,fill="blue",width=6)
-lines.append(fullLine)
-lines.append(topLine)
-lines.append(middleLine)
-lines.append(bottomLine)
+###----Water level graphic----#
+##w = Canvas(root, 
+##           width=10, 
+##           height=400,
+##           bg="light grey")
+##w.grid(row=0, column=6)
+##
+##w.create_line(5,400,5,0,fill="grey",width=4)
+##
+###----Water Lines----#
+##lines = []
+##fullLine = w.create_line(1,5,10,5, fill="blue", width=6)
+##topLine = w.create_line(1,105,10,105,fill="blue",width=6)
+##middleLine = w.create_line(1,205,10,205,fill="blue", width=6)
+##bottomLine = w.create_line(1,305,10,305,fill="blue",width=6)
+##lines.append(fullLine)
+##lines.append(topLine)
+##lines.append(middleLine)
+##lines.append(bottomLine)
 
 
 device = AtlasI2C()
