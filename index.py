@@ -33,15 +33,19 @@ import numpy as np
 #----Initialization----#
 sht75_datagpio=27
 sht75_clkgpio=17
+sht = Sht(17,27)
 
-GPIO.setup(sht75_datagpio,GPIO.OUT, initial=GPIO.LOW)
-GPIO.setup(sht75_clkgpio,GPIO.OUT, initial=GPIO.LOW)
 GPIO.setwarnings(False)
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(6,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(11,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(9,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
 GPIO.setup(10,GPIO.IN,pull_up_down=GPIO.PUD_DOWN)
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(sht75_datagpio,GPIO.OUT, initial=GPIO.LOW)
+GPIO.setup(sht75_clkgpio,GPIO.OUT, initial=GPIO.LOW)
+
 i2c_list = [99,100,102] #99 is pH, 100 is EC, 102 is Temp
 ser = serial.Serial("/dev/serial0",bytesize=8,baudrate =9600,timeout = .5) #serial connection for CO2
 
@@ -221,12 +225,12 @@ class AtlasI2C(ttk.Frame):          #ttk.Frame is a container used to group othe
             #button for EC settings and calibration
             self.ecSettings = ECSettings()
             b = tk.Button(root, text="EC settings and calibration", command=self.ecSettings.start)#self.ecSettings.calib_sett)
-            b.grid(row=8,sticky=W)
+            b.grid(row=10,sticky=W)
 
             #button for pH calibration
             self.phSettings = PHSettings()
             c = tk.Button(root, text="PH calibration", command=self.phSettings.calib_sett)
-            c.grid(row=9, sticky=W)
+            c.grid(row=11, sticky=W)
 
 
         #----initializes I2C to either a user specified or default address----#
@@ -287,6 +291,9 @@ class AtlasI2C(ttk.Frame):          #ttk.Frame is a container used to group othe
 
             return self.read()
 
+
+class Readings(ttk.Frame):
+    
         #display pH values read from i2c device
         def pH_reading(self):
             global pH_value
@@ -300,7 +307,7 @@ class AtlasI2C(ttk.Frame):          #ttk.Frame is a container used to group othe
             device.set_i2c_address(EC_addr)
             device.read(num_of_bytes=31)
             split = value_list.split(",")
-            if(self.ecSettings.conductivity.get() == 1):
+            if(device.ecSettings.conductivity.get() == 1):
                 EC_value.set(split[0])
             else:
                 EC_value.set("not read")
@@ -311,7 +318,7 @@ class AtlasI2C(ttk.Frame):          #ttk.Frame is a container used to group othe
             device.set_i2c_address(EC_addr)
             device.read(num_of_bytes=31)
             split = value_list.split(",")
-            if(self.ecSettings.TDS.get() == 1):
+            if(device.ecSettings.TDS.get() == 1):
                 TDS_value.set(split[1])
             else:
                 TDS_value.set("not read")
@@ -322,7 +329,7 @@ class AtlasI2C(ttk.Frame):          #ttk.Frame is a container used to group othe
             device.set_i2c_address(EC_addr)
             device.read(num_of_bytes=31)
             split = value_list.split(",")
-            if(self.ecSettings.salinity.get() == 1):
+            if(device.ecSettings.salinity.get() == 1):
                 Sal_value.set(split[2])
             else:
                 Sal_value.set("not read")
@@ -333,7 +340,7 @@ class AtlasI2C(ttk.Frame):          #ttk.Frame is a container used to group othe
             device.set_i2c_address(EC_addr)
             device.read(num_of_bytes=31)
             split = value_list.split(",")
-            if(self.ecSettings.SG.get() == 1):
+            if(device.ecSettings.SG.get() == 1):
                 SG_value.set(split[2])
             else:
                 SG_value.set("not read")
@@ -371,11 +378,18 @@ class AtlasI2C(ttk.Frame):          #ttk.Frame is a container used to group othe
 
         #display Temperature values read from i2c device
         def Temp_reading(self):
-            global Temp_value
+            global STemp_value
             device.set_i2c_address(temp_addr)
             
             device.read(num_of_bytes=31)
-            Temp_value.set(value_list)
+            STemp_value.set(value_list)
+
+        def RH_reading(self):
+            global ATemp_value,RH_value
+    
+            #sht=Sht(sht75_clkgpio,sht75_datagpio)
+            ATemp_value.set('%.3f'%(sht.read_t())) #truncate values to 3 decimal points
+            RH_value.set('%.3f'%(sht.read_rh()))
 
 
     
@@ -383,14 +397,15 @@ def main():
     #while True:
 
         #----Thread readings for each component on main interface----#
-        t1 = threading.Thread(target=device.pH_reading())
-        t2 = threading.Thread(target=device.EC_reading())
-        t3 = threading.Thread(target=device.TDS_reading())
-        t4 = threading.Thread(target=device.Sal_reading())
-        t5 = threading.Thread(target=device.SG_reading())
-        #t6 = threading.Thread(target=device.status_IO())
-        t7 = threading.Thread(target=device.CO2_reading())
-        t8 = threading.Thread(target=device.Temp_reading())
+        t1 = threading.Thread(target=read.pH_reading())
+        t2 = threading.Thread(target=read.EC_reading())
+        t3 = threading.Thread(target=read.TDS_reading())
+        t4 = threading.Thread(target=read.Sal_reading())
+        t5 = threading.Thread(target=read.SG_reading())
+        #t6 = threading.Thread(target=read.status_IO())
+        t7 = threading.Thread(target=read.CO2_reading())
+        t8 = threading.Thread(target=read.Temp_reading())
+        t9 = threading.Thread(target=read.RH_reading())
 
 
         t1.start()
@@ -401,6 +416,7 @@ def main():
         #t6.start()
         t7.start()
         t8.start()
+        t9.start()
 
         t1.join()
         t2.join()
@@ -410,6 +426,7 @@ def main():
         #t6.join()
         t7.join()
         t8.join()
+        t9.join()
 
         global current, date
         current=time.strftime("%H:%M")
@@ -453,25 +470,32 @@ SG_frame.grid(row=4, column=0, sticky="w")
 CO2_frame=Frame(root,bg=red_bg)
 CO2_frame.grid(row=5,column=0,sticky="w")
 
-Temp_frame=Frame(root,bg=red_bg)
-Temp_frame.grid(row=6,column=0,sticky="w")
+STemp_frame=Frame(root,bg=red_bg)
+STemp_frame.grid(row=6,column=0,sticky="w")
+
+RH_frame=Frame(root,bg=red_bg)
+RH_frame.grid(row=8,column=0,sticky="w")
 
 
 #---Tkinter init/layout---#
 pH_value = StringVar()
-pH_value.set(0.00)
+pH_value.set("NAN")
 EC_value = StringVar()
-EC_value.set(0.00)
+EC_value.set("NAN")
 TDS_value = StringVar()
-TDS_value.set(0.00)
+TDS_value.set("NAN")
 Sal_value = StringVar()
-Sal_value.set(0.00)
+Sal_value.set("NAN")
 SG_value = StringVar()
-SG_value.set(0.00)
+SG_value.set("NAN")
 CO2_value = StringVar()
-CO2_value.set(0.00)
-Temp_value = StringVar()
-Temp_value.set(0.00)
+CO2_value.set("NAN")
+STemp_value = StringVar()
+STemp_value.set("NAN")
+ATemp_value = StringVar()
+ATemp_value.set("NAN")
+RH_value = StringVar()
+RH_value.set("NAN")
 
 
 DateText=Label(Clock_frame,text="",bg="black",fg="red", font=h1)
@@ -497,22 +521,24 @@ Label(SG_frame,textvariable=SG_value,bg="blue",fg="white",font=h1).grid(row=0,co
 Label(CO2_frame,text="CO2: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
 Label(CO2_frame,textvariable=CO2_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
 
-Label(Temp_frame,text="Solution Temperature: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
-Label(Temp_frame,textvariable=Temp_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
+Label(STemp_frame,text="Solution Temperature: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
+Label(STemp_frame,textvariable=STemp_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
+
+Label(RH_frame,text="Relative Humidity: ",bg="green",fg="White",font=h1).grid(row=0,column=0)
+Label(RH_frame,textvariable=RH_value, bg="blue", fg="White",font=h1).grid(row=0,column=1)
 
 
 
-
-Frame3 = Frame(root, bg="purple",width=400,height=200).grid(row=6,rowspan=2,column=17,columnspan=3,sticky=N+S+E+W)
-
-fig = Figure(figsize=(5, 4), dpi=100)
-t = np.arange(0, 3, .01)
-fig.add_subplot(111).plot(t, 2 * np.sin(2 * np.pi * t))
-
-canvas1 = FigureCanvasTkAgg(fig, master=Frame3)  # A tk.DrawingArea.
-#canvas1.show()
-#fig.canvas.draw()
-canvas1.get_tk_widget().grid(row=6,column=17)
+##Frame3 = Frame(root, bg="purple",width=400,height=200).grid(row=6,rowspan=2,column=17,columnspan=3,sticky=N+S+E+W)
+##
+##fig = Figure(figsize=(5, 4), dpi=100)
+##t = np.arange(0, 3, .01)
+##fig.add_subplot(111).plot(t, 2 * np.sin(2 * np.pi * t))
+##
+##canvas1 = FigureCanvasTkAgg(fig, master=Frame3)  # A tk.DrawingArea.
+###canvas1.show()
+###fig.canvas.draw()
+##canvas1.get_tk_widget().grid(row=6,column=17)
 
 ###----Water level graphic----#
 ##w = Canvas(root, 
@@ -536,6 +562,7 @@ canvas1.get_tk_widget().grid(row=6,column=17)
 
 
 device = AtlasI2C()
+read = Readings()
 main()
 #if __name__ == '__main__':
 #	main()
